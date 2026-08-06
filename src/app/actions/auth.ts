@@ -4,11 +4,31 @@ import { cookies } from 'next/headers';
 import { redirect } from 'next/navigation';
 import { createServerSupabaseClient } from '@/lib/supabase/server';
 
+export async function signInAction(formData: FormData) {
+  const email = String(formData.get('email') ?? '').trim();
+  const password = String(formData.get('password') ?? '');
+
+  if (!email || !password) {
+    redirect('/?error=Email+and+password+are+required');
+  }
+
+  const supabase = await createServerSupabaseClient(await cookies());
+
+  if (supabase) {
+    const { error } = await supabase.auth.signInWithPassword({ email, password });
+    if (error) {
+      redirect(`/?error=${encodeURIComponent(error.message)}`);
+    }
+  }
+
+  redirect('/dashboard');
+}
+
 export async function sendMagicLinkAction(formData: FormData) {
   const email = String(formData.get('email') ?? '').trim();
 
   if (!email) {
-    throw new Error('Email is required.');
+    redirect('/?error=Email+is+required');
   }
 
   const supabase = await createServerSupabaseClient(await cookies());
@@ -23,13 +43,12 @@ export async function sendMagicLinkAction(formData: FormData) {
     });
 
     if (error) {
-      throw new Error(error.message);
+      redirect(`/?error=${encodeURIComponent(error.message)}`);
     }
 
     redirect('/?sent=true');
   }
 
-  // Fallback for dev mode when Supabase env keys are not present
   redirect('/dashboard');
 }
 
