@@ -500,17 +500,35 @@ export function CalendarView({
     if (isSubmitting) return;
     const start = new Date(startTime); const end = new Date(endTime);
     if (end <= start) { alert('End time must be after start time.'); return; }
+
+    const courseId = selectedCourse || courses[0]?.id || 'c-1';
+    const mentorId = selectedMentor || users.find((u) => u.role === 'mentor' || u.role === 'admin')?.id || users[0]?.id;
+
+    if (!mentorId) {
+      alert('Please select a valid mentor.');
+      return;
+    }
+
     setIsSubmitting(true);
     try {
       const newCls = await createClassAction({
-        course_id: selectedCourse, batch_id: selectedBatch || null,
-        mentor_id: selectedMentor, title: classTitle.trim() || courses.find((c) => c.id === selectedCourse)?.name || 'New Class',
-        start_time: start.toISOString(), end_time: end.toISOString(), recurring: isRecurring
+        course_id: courseId,
+        batch_id: selectedBatch || null,
+        mentor_id: mentorId,
+        title: classTitle.trim() || courses.find((c) => c.id === courseId)?.name || 'New Class',
+        start_time: start.toISOString(),
+        end_time: end.toISOString(),
+        recurring: isRecurring
       });
       setClasses([newCls, ...classes]);
       setIsDrawerOpen(false); resetClassForm();
       showToast('✅ Class scheduled! Mentor notified + T-1hr reminder queued.');
-    } catch { alert('Failed to create class.'); } finally { setIsSubmitting(false); }
+    } catch (err: any) {
+      console.error('[handleCreateClass]', err);
+      alert(err.message || 'Failed to create class.');
+    } finally {
+      setIsSubmitting(false);
+    }
   };
 
   const handleCreateDemo = async (e: React.FormEvent) => {
@@ -518,16 +536,31 @@ export function CalendarView({
     if (isSubmitting) return;
     const start = new Date(demoStart); const end = new Date(demoEnd);
     if (end <= start) { alert('End time must be after start time.'); return; }
+
+    const mentorId = demoMentor || users.find((u) => u.role === 'mentor' || u.role === 'admin')?.id || users[0]?.id;
+    if (!mentorId) {
+      alert('Please select a valid mentor.');
+      return;
+    }
+
     setIsSubmitting(true);
     try {
       const newDemo = await createDemoClassAction({
-        mentor_id: demoMentor, title: demoTitle.trim() || 'Demo Class',
-        start_time: start.toISOString(), end_time: end.toISOString(), attendees: demoAttendees
+        mentor_id: mentorId,
+        title: demoTitle.trim() || 'Demo Class',
+        start_time: start.toISOString(),
+        end_time: end.toISOString(),
+        attendees: demoAttendees
       });
       setDemos([newDemo, ...demos]);
       setIsDrawerOpen(false); resetDemoForm();
       showToast(`✅ Demo scheduled with ${demoAttendees.length} student${demoAttendees.length !== 1 ? 's' : ''}.`);
-    } catch { alert('Failed to create demo.'); } finally { setIsSubmitting(false); }
+    } catch (err: any) {
+      console.error('[handleCreateDemo]', err);
+      alert(err.message || 'Failed to create demo.');
+    } finally {
+      setIsSubmitting(false);
+    }
   };
 
   // ── Render ────────────────────────────────────────────────────────────────

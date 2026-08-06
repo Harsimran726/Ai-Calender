@@ -116,7 +116,7 @@ export function TaskKanban({ initialTasks, clients, users }: TaskKanbanProps) {
 
     setIsSubmitting(true);
     try {
-      const newTask = await createTaskAction({
+      const result = await createTaskAction({
         title: title.trim(),
         priority,
         estimated_minutes: Number(estMinutes),
@@ -127,11 +127,17 @@ export function TaskKanban({ initialTasks, clients, users }: TaskKanbanProps) {
         due_at: dueAt ? new Date(dueAt).toISOString() : null
       });
 
-      setTasks((prev) => [newTask, ...prev]);
+      if (!result.success || !result.task) {
+        alert(result.error || 'Failed to create task. Please try again.');
+        return;
+      }
+
+      setTasks((prev) => [result.task!, ...prev]);
       resetForm();
       setIsModalOpen(false);
     } catch (err) {
       console.error('Failed to create task:', err);
+      alert('An unexpected error occurred. Please try again.');
     } finally {
       setIsSubmitting(false);
     }

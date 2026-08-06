@@ -24,18 +24,27 @@ export function ProfileClient({ initialProfile }: ProfileClientProps) {
 
     setIsSaving(true);
     try {
-      const updated = await updateProfileAction(profile.id, {
+      const result = await updateProfileAction(profile.id, {
         name: name.trim(),
         email: email.trim(),
         profile_picture_url: pictureUrl.trim() || null
       });
-      if (updated) {
-        setProfile(updated);
+      if (result.success) {
+        // Update local state with what we submitted
+        setProfile((prev) => ({
+          ...prev,
+          name: name.trim(),
+          email: email.trim(),
+          profile_picture_url: pictureUrl.trim() || null
+        }));
+        setSavedMsg(true);
+        setTimeout(() => setSavedMsg(false), 3500);
+      } else {
+        alert(result.error || 'Failed to save profile.');
       }
-      setSavedMsg(true);
-      setTimeout(() => setSavedMsg(false), 3500);
     } catch (err) {
       console.error('Profile update failed:', err);
+      alert('An unexpected error occurred.');
     } finally {
       setIsSaving(false);
     }

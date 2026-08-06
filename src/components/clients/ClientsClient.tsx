@@ -42,7 +42,7 @@ export function ClientsClient({ initialClients, userRole }: ClientsClientProps) 
     e.preventDefault();
     if (!name) return;
 
-    const newClient = await createClientAction({
+    const result = await createClientAction({
       name,
       company,
       contact,
@@ -51,7 +51,12 @@ export function ClientsClient({ initialClients, userRole }: ClientsClientProps) 
       status
     });
 
-    setClients([newClient, ...clients]);
+    if (!result.success || !result.client) {
+      alert(result.error || 'Failed to create client. Please try again.');
+      return;
+    }
+
+    setClients([result.client, ...clients]);
     setName('');
     setCompany('');
     setContact('');

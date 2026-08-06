@@ -35,7 +35,11 @@ export function UsersClient({ initialUsers }: UsersClientProps) {
       formData.set('email', email);
       formData.set('role', role);
 
-      await createUserAction(formData);
+      const result = await createUserAction(formData);
+      if (!result.success) {
+        setErrorMsg(result.error || 'Failed to create user.');
+        return;
+      }
       
       const newUser: UserProfile = {
         id: `u-${Date.now()}`,

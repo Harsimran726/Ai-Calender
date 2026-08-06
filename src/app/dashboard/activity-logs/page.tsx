@@ -1,39 +1,26 @@
 import { AppShell } from '@/components/app-shell';
 import { redirect } from 'next/navigation';
-import { createServerSupabaseClient } from '@/lib/supabase/server';
-import { getActivityLogs } from '@/lib/store';
+import { createServiceRoleClient } from '@/lib/supabase/server';
 import { Clock, Activity, AlertCircle } from 'lucide-react';
 import type { ActivityLog } from '@/lib/types';
 import { BackButton } from '@/components/back-button';
-import { getCurrentUser } from '@/lib/auth';
+import { requireAuth } from '@/lib/auth';
 
 export default async function ActivityLogsPage() {
-  const supabase = await createServerSupabaseClient();
+  const currentUser = await requireAuth();
+  if (!currentUser) redirect('/');
+  if (currentUser.role !== 'admin') redirect('/dashboard');
 
-  if (supabase) {
-    const { data: { user } } = await supabase.auth.getUser();
-    if (!user) {
-      redirect('/');
-    }
-  }
-
-  const currentUser = await getCurrentUser();
-
-  if (currentUser.role !== 'admin') {
-    redirect('/dashboard');
-  }
-
-  // Fetch logs — from Supabase if connected, else in-memory store
-  let logs: ActivityLog[] = getActivityLogs();
-  if (supabase) {
-    const { data: dbLogs } = await supabase
+  // Fetch logs via service role — bypasses RLS
+  let logs: ActivityLog[] = [];
+  const adminClient = createServiceRoleClient();
+  if (adminClient) {
+    const { data: dbLogs } = await adminClient
       .from('activity_logs')
       .select('*')
       .order('created_at', { ascending: false })
       .limit(200);
-    if (dbLogs && dbLogs.length > 0) {
-      logs = dbLogs as ActivityLog[];
-    }
+    if (dbLogs) logs = dbLogs as ActivityLog[];
   }
 
   const entityColors: Record<string, string> = {
@@ -88,7 +75,7 @@ export default async function ActivityLogsPage() {
                     </div>
                     <div className="min-w-0">
                       <p className="text-sm font-semibold text-text-primary truncate">
-                        {log.actor_name}{' '}
+                        {log.actor_name || 'System'}{' '}
                         <span className="font-normal text-text-secondary">— {log.action}</span>
                       </p>
                       <p className="text-xs text-text-secondary mt-0.5">

@@ -1,29 +1,40 @@
 'use server';
 
 import { revalidatePath } from 'next/cache';
-import { createServerSupabaseClient } from '@/lib/supabase/server';
-import { getTasks, addTask, updateTask, getClients, getUsers } from '@/lib/store';
+import { createServiceRoleClient } from '@/lib/supabase/server';
 import { Task, TaskPriority, TaskStatus, WorkType } from '@/lib/types';
 
-export async function fetchTasksDataAction() {
-  const supabase = await createServerSupabaseClient();
-  let tasks = getTasks();
-  let clients = getClients();
-  let users = getUsers();
+// ─── Helpers ──────────────────────────────────────────────────────────────────
 
-  if (supabase) {
-    const { data: dbTasks } = await supabase.from('tasks').select('*').order('created_at', { ascending: false });
-    if (dbTasks) tasks = dbTasks as any;
-
-    const { data: dbClients } = await supabase.from('clients').select('*');
-    if (dbClients) clients = dbClients as any;
-
-    const { data: dbUsers } = await supabase.from('users').select('*');
-    if (dbUsers) users = dbUsers as any;
-  }
-
-  return { tasks, clients, users };
+function db() {
+  const client = createServiceRoleClient();
+  if (!client) throw new Error('Supabase service role key is not configured.');
+  return client;
 }
+
+// ─── Fetch ────────────────────────────────────────────────────────────────────
+
+export async function fetchTasksDataAction() {
+  try {
+    const supabase = db();
+    // Parallel fetch for speed
+    const [{ data: tasks }, { data: clients }, { data: users }] = await Promise.all([
+      supabase.from('tasks').select('*').order('created_at', { ascending: false }),
+      supabase.from('clients').select('id, name, status'),
+      supabase.from('users').select('id, name, email, role')
+    ]);
+    return {
+      tasks: (tasks ?? []) as Task[],
+      clients: clients ?? [],
+      users: users ?? []
+    };
+  } catch (e) {
+    console.error('[fetchTasksDataAction]', e);
+    return { tasks: [], clients: [], users: [] };
+  }
+}
+
+// ─── Create ───────────────────────────────────────────────────────────────────
 
 export async function createTaskAction(payload: {
   title: string;
@@ -34,48 +45,75 @@ export async function createTaskAction(payload: {
   client_id?: string | null;
   assigned_to?: string | null;
   due_at?: string | null;
-}) {
-  const supabase = await createServerSupabaseClient();
-  if (supabase) {
-    await supabase.from('tasks').insert({
-      id: crypto.randomUUID(),
-      ...payload,
-      actual_minutes: 0,
-      status: 'todo'
-    });
+}): Promise<{ success: boolean; task?: Task; error?: string }> {
+  try {
+    const { data, error } = await db()
+      .from('tasks')
+      .insert({
+        id: crypto.randomUUID(),
+        ...payload,
+        actual_minutes: 0,
+        status: 'todo'
+      })
+      .select()
+      .single();
+
+    if (error) throw error;
+    revalidatePath('/dashboard/tasks');
+    return { success: true, task: data as Task };
+  } catch (e: any) {
+    console.error('[createTaskAction]', e);
+    return { success: false, error: e.message };
   }
-
-  const created = addTask({
-    ...payload,
-    actual_minutes: 0,
-    status: 'todo'
-  });
-
-  revalidatePath('/dashboard/tasks');
-  return created;
 }
 
-export async function updateTaskStatusAction(taskId: string, status: TaskStatus) {
-  const supabase = await createServerSupabaseClient();
-  if (supabase) {
-    await supabase.from('tasks').update({ status }).eq('id', taskId);
+// ─── Update Status ────────────────────────────────────────────────────────────
+
+export async function updateTaskStatusAction(
+  taskId: string,
+  status: TaskStatus
+): Promise<{ success: boolean; error?: string }> {
+  try {
+    const { error } = await db()
+      .from('tasks')
+      .update({ status, updated_at: new Date().toISOString() })
+      .eq('id', taskId);
+    if (error) throw error;
+    revalidatePath('/dashboard/tasks');
+    return { success: true };
+  } catch (e: any) {
+    console.error('[updateTaskStatusAction]', e);
+    return { success: false, error: e.message };
   }
-  updateTask(taskId, { status });
-  revalidatePath('/dashboard/tasks');
-  return { success: true };
 }
 
-export async function logTaskTimeAction(taskId: string, additionalMinutes: number) {
-  const tasks = getTasks();
-  const current = tasks.find((t) => t.id === taskId);
-  const newActual = (current?.actual_minutes || 0) + additionalMinutes;
+// ─── Log Time ─────────────────────────────────────────────────────────────────
 
-  const supabase = await createServerSupabaseClient();
-  if (supabase) {
-    await supabase.from('tasks').update({ actual_minutes: newActual }).eq('id', taskId);
+export async function logTaskTimeAction(
+  taskId: string,
+  additionalMinutes: number
+): Promise<{ success: boolean; actual_minutes?: number; error?: string }> {
+  try {
+    const { data: current, error: fetchErr } = await db()
+      .from('tasks')
+      .select('actual_minutes')
+      .eq('id', taskId)
+      .single();
+
+    if (fetchErr) throw fetchErr;
+
+    const newActual = ((current?.actual_minutes as number) || 0) + additionalMinutes;
+
+    const { error: updateErr } = await db()
+      .from('tasks')
+      .update({ actual_minutes: newActual, updated_at: new Date().toISOString() })
+      .eq('id', taskId);
+
+    if (updateErr) throw updateErr;
+    revalidatePath('/dashboard/tasks');
+    return { success: true, actual_minutes: newActual };
+  } catch (e: any) {
+    console.error('[logTaskTimeAction]', e);
+    return { success: false, error: e.message };
   }
-
-  updateTask(taskId, { actual_minutes: newActual });
-  revalidatePath('/dashboard/tasks');
-  return { success: true, actual_minutes: newActual };
 }
