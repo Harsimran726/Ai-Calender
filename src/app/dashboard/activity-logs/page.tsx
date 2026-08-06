@@ -1,43 +1,26 @@
 import { AppShell } from '@/components/app-shell';
 import { redirect } from 'next/navigation';
 import { createServerSupabaseClient } from '@/lib/supabase/server';
-import { getActivityLogs, getUsers } from '@/lib/store';
+import { getActivityLogs } from '@/lib/store';
 import { Clock, Activity, AlertCircle } from 'lucide-react';
 import type { ActivityLog } from '@/lib/types';
 import { BackButton } from '@/components/back-button';
+import { getCurrentUser } from '@/lib/auth';
 
 export default async function ActivityLogsPage() {
   const supabase = await createServerSupabaseClient();
-  let userName = 'Harsimran Singh (Admin)';
-  let userRole: 'admin' | 'mentor' | 'employee' = 'admin';
 
   if (supabase) {
-    const {
-      data: { user }
-    } = await supabase.auth.getUser();
-
+    const { data: { user } } = await supabase.auth.getUser();
     if (!user) {
       redirect('/');
     }
+  }
 
-    const { data: profile } = await supabase
-      .from('users')
-      .select('name, role, email')
-      .eq('id', user.id)
-      .maybeSingle();
+  const currentUser = await getCurrentUser();
 
-    if (profile?.role !== 'admin') {
-      redirect('/dashboard');
-    }
-
-    userName = profile?.name ?? user.email ?? 'User';
-    userRole = profile?.role ?? 'admin';
-  } else {
-    const seedAdmin = getUsers().find((u) => u.role === 'admin');
-    if (seedAdmin) {
-      userName = seedAdmin.name;
-      userRole = seedAdmin.role;
-    }
+  if (currentUser.role !== 'admin') {
+    redirect('/dashboard');
   }
 
   // Fetch logs — from Supabase if connected, else in-memory store
@@ -63,7 +46,7 @@ export default async function ActivityLogsPage() {
   };
 
   return (
-    <AppShell userName={userName} userRole={userRole}>
+    <AppShell userName={currentUser.name} userRole={currentUser.role}>
       <div className="space-y-6">
         <BackButton href="/dashboard" label="Dashboard" />
         {/* Header */}
