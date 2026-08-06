@@ -1,5 +1,5 @@
-import { ArrowRight, CalendarRange, ShieldCheck, Sparkles, CalendarDays, ListTodo, Users2 } from 'lucide-react';
-import { signInAction } from './actions/auth';
+import { ArrowRight, CalendarRange, ShieldCheck, Sparkles, CalendarDays, ListTodo, Users2, Mail, CheckCircle2 } from 'lucide-react';
+import { sendMagicLinkAction } from './actions/auth';
 
 const features = [
   { icon: CalendarDays, label: 'Calendar Grid', desc: 'Drag, resize, and reschedule classes & demos in real-time' },
@@ -8,7 +8,13 @@ const features = [
   { icon: ShieldCheck, label: 'Role-Based Access', desc: 'Admin, Mentor, and Employee roles with scoped dashboards' }
 ];
 
-export default function HomePage() {
+type HomePageProps = {
+  searchParams: Promise<{ sent?: string }>;
+};
+
+export default async function HomePage({ searchParams }: HomePageProps) {
+  const { sent } = await searchParams;
+
   return (
     <main className="min-h-screen px-4 py-6 sm:px-6 lg:px-8">
       <div className="grid min-h-[calc(100vh-3rem)] gap-6 lg:grid-cols-[1.15fr_0.85fr] lg:items-center">
@@ -60,69 +66,61 @@ export default function HomePage() {
           </div>
         </section>
 
-        {/* Login Section */}
+        {/* Secure Passwordless Login Section */}
         <section className="rounded-[32px] border border-white/8 bg-[rgba(17,19,26,0.9)] p-6 shadow-soft sm:p-8">
           <div className="rounded-[24px] border border-white/8 bg-white/5 p-6">
             <div className="flex items-center justify-between">
               <div>
-                <p className="text-sm text-text-secondary">Welcome back</p>
-                <h2 className="mt-1 font-display text-2xl font-semibold text-text-primary">Sign in</h2>
+                <p className="text-sm text-text-secondary">Enterprise Security</p>
+                <h2 className="mt-1 font-display text-2xl font-semibold text-text-primary">Passwordless Sign In</h2>
               </div>
               <div className="flex h-12 w-12 items-center justify-center rounded-2xl bg-primary/15 text-primary">
                 <CalendarRange className="h-6 w-6" />
               </div>
             </div>
 
-            <form className="mt-6 space-y-4" action={signInAction}>
-              <label className="block">
-                <span className="mb-2 block text-sm font-medium text-text-secondary">Email</span>
-                <input
-                  type="email"
-                  name="email"
-                  required
-                  defaultValue="admin@company.com"
-                  placeholder="admin@company.com"
-                  className="w-full rounded-2xl border border-white/10 bg-black/20 px-4 py-3 text-text-primary outline-none transition placeholder:text-text-secondary focus:border-primary focus:ring-1 focus:ring-primary/30"
-                />
-              </label>
-              <label className="block">
-                <span className="mb-2 block text-sm font-medium text-text-secondary">Password</span>
-                <input
-                  type="password"
-                  name="password"
-                  required
-                  placeholder="••••••••"
-                  className="w-full rounded-2xl border border-white/10 bg-black/20 px-4 py-3 text-text-primary outline-none transition placeholder:text-text-secondary focus:border-primary focus:ring-1 focus:ring-primary/30"
-                />
-              </label>
+            {sent ? (
+              <div className="mt-6 space-y-4 rounded-2xl border border-accent-class/30 bg-accent-class/10 p-5 text-center">
+                <div className="mx-auto flex h-12 w-12 items-center justify-center rounded-full bg-accent-class/20 text-accent-class">
+                  <CheckCircle2 className="h-6 w-6" />
+                </div>
+                <h3 className="text-base font-semibold text-text-primary">Check your email</h3>
+                <p className="text-xs text-text-secondary">
+                  We sent a secure login magic link to your email address. Click the link in your inbox to sign in.
+                </p>
+              </div>
+            ) : (
+              <form className="mt-6 space-y-4" action={sendMagicLinkAction}>
+                <label className="block">
+                  <span className="mb-2 block text-sm font-medium text-text-secondary">Work Email</span>
+                  <div className="relative">
+                    <Mail className="absolute left-4 top-3.5 h-4 w-4 text-text-secondary pointer-events-none" />
+                    <input
+                      type="email"
+                      name="email"
+                      required
+                      placeholder="name@company.com"
+                      className="w-full rounded-2xl border border-white/10 bg-black/20 pl-11 pr-4 py-3 text-text-primary outline-none transition placeholder:text-text-secondary focus:border-primary focus:ring-1 focus:ring-primary/30"
+                    />
+                  </div>
+                </label>
 
-              <button
-                type="submit"
-                className="w-full rounded-2xl bg-primary px-4 py-3 text-sm font-semibold text-white shadow-glow transition hover:bg-primary-hover"
-              >
-                Sign in
-              </button>
-
-              {/* Quick access — development shortcut */}
-              <a
-                href="/dashboard"
-                className="flex w-full items-center justify-center gap-2 rounded-2xl border border-white/10 bg-white/5 px-4 py-3 text-sm font-medium text-text-secondary transition hover:bg-white/10 hover:text-text-primary"
-              >
-                <ShieldCheck className="h-4 w-4" />
-                Quick Access (Dev Mode — skip login)
-              </a>
-            </form>
+                <button
+                  type="submit"
+                  className="w-full rounded-2xl bg-primary px-4 py-3 text-sm font-semibold text-white shadow-glow transition hover:bg-primary-hover flex items-center justify-center gap-2"
+                >
+                  <Mail className="h-4 w-4" />
+                  Send Login Magic Link
+                </button>
+              </form>
+            )}
           </div>
 
-          <div className="mt-4 rounded-[24px] border border-white/8 bg-white/5 p-4">
-            <p className="text-xs font-semibold uppercase tracking-wider text-text-secondary mb-2">
-              Dev Credentials (no Supabase needed)
+          <div className="mt-4 rounded-[24px] border border-white/8 bg-white/5 p-4 flex items-center gap-3">
+            <ShieldCheck className="h-5 w-5 text-primary flex-shrink-0" />
+            <p className="text-xs text-text-secondary">
+              High-security zero-password authentication enabled. Access is restricted to authorized team email accounts.
             </p>
-            <div className="space-y-1 text-xs text-text-secondary font-mono">
-              <p>📧 admin@company.com → <span className="text-primary">Admin</span></p>
-              <p>📧 sarah.mentor@company.com → <span className="text-accent-class">Mentor</span></p>
-              <p>📧 jordan.emp@company.com → <span className="text-accent-demo">Employee</span></p>
-            </div>
           </div>
         </section>
 
