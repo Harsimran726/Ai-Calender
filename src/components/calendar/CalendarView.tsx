@@ -3,7 +3,8 @@
 import { useState, useCallback } from 'react';
 import { ClassEvent, DemoClassEvent, Task, UserProfile, Course, Batch } from '@/lib/types';
 import { createClassAction, createDemoClassAction } from '@/app/actions/calendar';
-import { Plus, ChevronLeft, ChevronRight, CheckCircle2, X, Bell, Clock } from 'lucide-react';
+import { Plus, ChevronLeft, ChevronRight, CheckCircle2, X, Bell, Clock, Layers } from 'lucide-react';
+import { BatchManager } from './BatchManager';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -381,6 +382,8 @@ export function CalendarView({
   const [selectedCategory, setSelectedCategory] = useState<'all' | 'class' | 'demo' | 'task'>('all');
   const [isDrawerOpen, setIsDrawerOpen] = useState(false);
   const [drawerType, setDrawerType] = useState<'class' | 'demo'>('class');
+  const [isBatchManagerOpen, setIsBatchManagerOpen] = useState(false);
+  const [liveBatches, setLiveBatches] = useState<Batch[]>(batches);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [toastMsg, setToastMsg] = useState('');
   const [toastVisible, setToastVisible] = useState(false);
@@ -389,7 +392,11 @@ export function CalendarView({
   const [classTitle, setClassTitle] = useState('');
   const [selectedCourse, setSelectedCourse] = useState(courses[0]?.id || '');
   const [selectedBatch, setSelectedBatch] = useState('');
-  const [selectedMentor, setSelectedMentor] = useState(users.find((u) => u.role === 'mentor')?.id || users[0]?.id || '');
+  const [selectedMentor, setSelectedMentor] = useState(
+    users.find((u) => u.role === 'mentor')?.id ||
+    users.find((u) => u.role === 'admin')?.id ||
+    users[0]?.id || ''
+  );
   const [startTime, setStartTime] = useState(() => { const n = new Date(); n.setMinutes(n.getMinutes() - n.getTimezoneOffset()); return n.toISOString().slice(0, 16); });
   const [endTime, setEndTime]  = useState(() => { const n = new Date(Date.now() + 7200000); n.setMinutes(n.getMinutes() - n.getTimezoneOffset()); return n.toISOString().slice(0, 16); });
   const [isRecurring, setIsRecurring] = useState(false);
@@ -572,6 +579,14 @@ export function CalendarView({
             ))}
           </div>
 
+          {userRole === 'admin' && (
+            <button
+              onClick={() => setIsBatchManagerOpen(true)}
+              className="inline-flex items-center gap-2 rounded-2xl border border-white/10 bg-white/5 px-4 py-2.5 text-sm font-semibold text-text-secondary hover:bg-white/10 hover:text-text-primary transition"
+            >
+              <Layers className="h-4 w-4" /> Manage Batches
+            </button>
+          )}
           {(userRole === 'admin' || userRole === 'mentor') && (
             <button onClick={() => { setDrawerType('class'); setIsDrawerOpen(true); }}
               className="inline-flex items-center gap-2 rounded-2xl bg-primary px-4 py-2.5 text-sm font-semibold text-white shadow-glow transition hover:bg-primary-hover">
@@ -696,7 +711,7 @@ export function CalendarView({
                   <label className="block text-xs font-medium text-text-secondary mb-1.5">Batch (optional)</label>
                   <select value={selectedBatch} onChange={(e) => setSelectedBatch(e.target.value)} className="w-full rounded-2xl border border-white/10 bg-black/40 px-4 py-2.5 text-sm text-text-primary outline-none focus:border-accent-class">
                     <option value="">— None —</option>
-                    {batches.map((b) => <option key={b.id} value={b.id}>{b.batch_name}</option>)}
+                    {liveBatches.map((b) => <option key={b.id} value={b.id}>{b.batch_name}{b.start_date ? ` (${new Date(b.start_date).toLocaleDateString([], {month:'short', year:'numeric'})})` : ''}</option>)}
                   </select>
                 </div>
 
@@ -787,6 +802,21 @@ export function CalendarView({
             )}
           </div>
         </div>
+      )}
+
+      {/* ── Batch Manager Modal ── */}
+      {isBatchManagerOpen && (
+        <BatchManager
+          initialBatches={liveBatches}
+          onClose={() => setIsBatchManagerOpen(false)}
+          onBatchesChange={(updated) => {
+            setLiveBatches(updated);
+            // Also reset selected batch if it was deleted
+            if (!updated.find((b) => b.id === selectedBatch)) {
+              setSelectedBatch('');
+            }
+          }}
+        />
       )}
     </div>
   );

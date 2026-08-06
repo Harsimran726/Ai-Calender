@@ -1,7 +1,7 @@
 'use server';
 
 import { revalidatePath } from 'next/cache';
-import { createServerSupabaseClient } from '@/lib/supabase/server';
+import { createServerSupabaseClient, createServiceRoleClient } from '@/lib/supabase/server';
 import {
   getClasses,
   addClassEvent,
@@ -12,6 +12,9 @@ import {
   getUsers,
   getTasks
 } from '@/lib/store';
+import { Batch } from '@/lib/types';
+
+// ─── Fetch Events ─────────────────────────────────────────────────────────────
 
 export async function fetchCalendarEventsAction() {
   const supabase = await createServerSupabaseClient();
@@ -33,13 +36,109 @@ export async function fetchCalendarEventsAction() {
   return { classes, demos, tasks };
 }
 
+// ─── Fetch Metadata (live from Supabase) ──────────────────────────────────────
+
 export async function fetchMetadataAction() {
-  return {
-    courses: getCourses(),
-    batches: getBatches(),
-    users: getUsers()
-  };
+  const adminClient = createServiceRoleClient();
+
+  let batches = getBatches();
+  let users = getUsers();
+  const courses = getCourses();
+
+  if (adminClient) {
+    // Fetch batches
+    const { data: dbBatches } = await adminClient
+      .from('batches')
+      .select('*')
+      .order('created_at', { ascending: false });
+    if (dbBatches) batches = dbBatches as Batch[];
+
+    // Fetch users — only mentor + admin roles for selectors
+    const { data: dbUsers } = await adminClient
+      .from('users')
+      .select('id, name, email, role, profile_picture_url, created_at')
+      .in('role', ['mentor', 'admin'])
+      .order('role', { ascending: false }); // admin first
+    if (dbUsers) users = dbUsers as any;
+  }
+
+  return { courses, batches, users };
 }
+
+// ─── Batch CRUD ───────────────────────────────────────────────────────────────
+
+export async function fetchBatchesAction(): Promise<Batch[]> {
+  const adminClient = createServiceRoleClient();
+  if (!adminClient) return getBatches();
+
+  const { data, error } = await adminClient
+    .from('batches')
+    .select('*')
+    .order('created_at', { ascending: false });
+
+  if (error || !data) return getBatches();
+  return data as Batch[];
+}
+
+export async function createBatchAction(payload: {
+  batch_name: string;
+  start_date?: string | null;
+}): Promise<{ success: boolean; error?: string; batch?: Batch }> {
+  const adminClient = createServiceRoleClient();
+  if (!adminClient) return { success: false, error: 'Service role not configured' };
+
+  const { data, error } = await adminClient
+    .from('batches')
+    .insert({ batch_name: payload.batch_name.trim(), start_date: payload.start_date || null })
+    .select()
+    .single();
+
+  if (error) return { success: false, error: error.message };
+  revalidatePath('/dashboard');
+  return { success: true, batch: data as Batch };
+}
+
+export async function updateBatchAction(
+  id: string,
+  payload: { batch_name: string; start_date?: string | null }
+): Promise<{ success: boolean; error?: string }> {
+  const adminClient = createServiceRoleClient();
+  if (!adminClient) return { success: false, error: 'Service role not configured' };
+
+  const { error } = await adminClient
+    .from('batches')
+    .update({ batch_name: payload.batch_name.trim(), start_date: payload.start_date || null })
+    .eq('id', id);
+
+  if (error) return { success: false, error: error.message };
+  revalidatePath('/dashboard');
+  return { success: true };
+}
+
+export async function deleteBatchAction(id: string): Promise<{ success: boolean; error?: string }> {
+  const adminClient = createServiceRoleClient();
+  if (!adminClient) return { success: false, error: 'Service role not configured' };
+
+  // Check if any classes reference this batch
+  const { count } = await adminClient
+    .from('classes')
+    .select('id', { count: 'exact', head: true })
+    .eq('batch_id', id);
+
+  if ((count ?? 0) > 0) {
+    return {
+      success: false,
+      error: `Cannot delete: ${count} class(es) are assigned to this batch. Reassign them first.`
+    };
+  }
+
+  const { error } = await adminClient.from('batches').delete().eq('id', id);
+  if (error) return { success: false, error: error.message };
+  revalidatePath('/dashboard');
+  return { success: true };
+}
+
+// ─── Class Creation ────────────────────────────────────────────────────────────
 
 export async function createClassAction(payload: {
   course_id: string;
@@ -55,12 +154,8 @@ export async function createClassAction(payload: {
   const sendAt = new Date(new Date(payload.start_time).getTime() - 3600000).toISOString();
 
   if (supabase) {
-    await supabase.from('classes').insert({
-      id: classId,
-      ...payload
-    });
+    await supabase.from('classes').insert({ id: classId, ...payload });
 
-    // Queue automated T-1hr email reminder in DB
     await supabase.from('reminders').insert({
       id: crypto.randomUUID(),
       event_type: 'class',
@@ -71,13 +166,12 @@ export async function createClassAction(payload: {
     });
   }
 
-  const created = addClassEvent({
-    ...payload,
-    status: 'scheduled'
-  });
+  const created = addClassEvent({ ...payload, status: 'scheduled' });
   revalidatePath('/dashboard');
   return created;
 }
+
+// ─── Demo Class Creation ───────────────────────────────────────────────────────
 
 export async function createDemoClassAction(payload: {
   mentor_id: string;
@@ -105,7 +199,6 @@ export async function createDemoClassAction(payload: {
       status: 'scheduled'
     });
 
-    // Queue automated T-1hr email reminder in DB
     await supabase.from('reminders').insert({
       id: crypto.randomUUID(),
       event_type: 'demo_class',
@@ -114,6 +207,10 @@ export async function createDemoClassAction(payload: {
       send_at: sendAt,
       sent: false
     });
+
+    if (attendeesWithId.length > 0) {
+      await supabase.from('demo_attendees').insert(attendeesWithId);
+    }
   }
 
   const created = addDemoClassEvent({
