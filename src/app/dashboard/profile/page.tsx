@@ -1,27 +1,23 @@
 import { redirect } from 'next/navigation';
-import { createServerSupabaseClient } from '@/lib/supabase/server';
-import { getUsers } from '@/lib/store';
 import { ProfileClient } from '@/components/profile/ProfileClient';
+import { requireAuth } from '@/lib/auth';
+import { createServiceRoleClient } from '@/lib/supabase/server';
+import { getUsers } from '@/lib/store';
 
 export default async function ProfilePage() {
-  const supabase = await createServerSupabaseClient();
+  const currentUser = await requireAuth();
+  if (!currentUser) redirect('/');
+
+  // Fetch full profile row via service role client (bypasses RLS)
+  const adminClient = createServiceRoleClient();
   let userProfile = getUsers()[0];
 
-  if (supabase) {
-    const {
-      data: { user }
-    } = await supabase.auth.getUser();
-
-    if (!user) {
-      redirect('/');
-    }
-
-    const { data: profile } = await supabase
+  if (adminClient) {
+    const { data: profile } = await adminClient
       .from('users')
       .select('*')
-      .eq('id', user.id)
+      .eq('id', currentUser.id)
       .maybeSingle();
-
     if (profile) {
       userProfile = profile;
     }

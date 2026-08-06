@@ -1,4 +1,4 @@
-import { createServerSupabaseClient } from '@/lib/supabase/server';
+import { createServerSupabaseClient, createServiceRoleClient } from '@/lib/supabase/server';
 import { getUsers } from '@/lib/store';
 import { UserRole } from '@/lib/types';
 
@@ -9,75 +9,133 @@ export type CurrentUser = {
   role: UserRole;
 };
 
+/**
+ * Resolves the currently authenticated user's full profile including role.
+ *
+ * STRATEGY:
+ * 1. Use the cookie-session client to get auth.users identity (who is logged in).
+ * 2. Use the SERVICE_ROLE client to fetch public.users profile — this BYPASSES RLS
+ *    so we always get the real role even if RLS blocks the anon key.
+ * 3. Email fallback: if UUID doesn't match (manually created users), find by email.
+ * 4. Auto-sync the ID if found by email, so future lookups are instant by UUID.
+ * 5. Dev-mode fallback when Supabase is not configured.
+ */
 export async function getCurrentUser(): Promise<CurrentUser> {
-  const supabase = await createServerSupabaseClient();
+  // Step 1: Get authenticated identity via cookie session
+  const authClient = await createServerSupabaseClient();
+  if (!authClient) {
+    // Dev mode — return seed admin
+    const seedAdmin = getUsers().find((u) => u.role === 'admin') || getUsers()[0];
+    return {
+      id: seedAdmin.id,
+      name: seedAdmin.name,
+      email: seedAdmin.email,
+      role: seedAdmin.role
+    };
+  }
 
-  if (supabase) {
-    const {
-      data: { user }
-    } = await supabase.auth.getUser();
+  const {
+    data: { user },
+    error: authError
+  } = await authClient.auth.getUser();
 
-    if (user) {
-      // 1. First try matching by Supabase Auth UUID (id = user.id)
-      let { data: profile } = await supabase
-        .from('users')
-        .select('id, name, role, email')
-        .eq('id', user.id)
-        .maybeSingle();
+  if (authError || !user) {
+    const seedAdmin = getUsers().find((u) => u.role === 'admin') || getUsers()[0];
+    return {
+      id: seedAdmin.id,
+      name: seedAdmin.name,
+      email: seedAdmin.email,
+      role: seedAdmin.role
+    };
+  }
 
-      // 2. If not found by ID (e.g. manually created in Auth), try matching by email address
-      if (!profile && user.email) {
-        const { data: profileByEmail } = await supabase
-          .from('users')
-          .select('id, name, role, email')
-          .ilike('email', user.email)
-          .maybeSingle();
+  // Step 2: Use SERVICE_ROLE client to bypass RLS when fetching the profile
+  const adminClient = createServiceRoleClient();
+  const db = adminClient || authClient; // fallback to auth client if service key missing
 
-        if (profileByEmail) {
-          profile = profileByEmail;
-          // Synchronize the profile ID to match the Auth UUID for future fast lookups
-          await supabase
-            .from('users')
-            .update({ id: user.id })
-            .eq('id', profileByEmail.id);
-        }
-      }
+  // Step 3a: Try by UUID first (the fast path)
+  let { data: profile } = await db
+    .from('users')
+    .select('id, name, role, email')
+    .eq('id', user.id)
+    .maybeSingle();
 
-      if (profile) {
-        return {
-          id: user.id,
-          name: profile.name || user.email || 'User',
-          email: profile.email || user.email || '',
-          role: (profile.role as UserRole) || 'employee'
-        };
-      }
+  // Step 3b: If UUID lookup fails, try by email (handles manually-created users)
+  if (!profile && user.email) {
+    const { data: profileByEmail } = await db
+      .from('users')
+      .select('id, name, role, email')
+      .ilike('email', user.email)
+      .maybeSingle();
 
-      // 3. Fallback: If user exists in Auth but has no row in public.users yet, create it with default or inferred role
-      const fallbackRole: UserRole = user.email?.includes('admin') ? 'admin' : user.email?.includes('mentor') ? 'mentor' : 'employee';
-      const fallbackName = user.user_metadata?.name || user.email?.split('@')[0] || 'User';
+    if (profileByEmail) {
+      profile = profileByEmail;
 
-      await supabase.from('users').upsert({
-        id: user.id,
-        name: fallbackName,
-        email: user.email || '',
-        role: fallbackRole
-      });
+      // Step 4: Auto-sync the ID so future lookups hit UUID path
+      await db.from('users').update({ id: user.id }).eq('id', profileByEmail.id);
 
-      return {
-        id: user.id,
-        name: fallbackName,
-        email: user.email || '',
-        role: fallbackRole
-      };
+      console.log(
+        `[Auth] ID synced for "${user.email}": old=${profileByEmail.id} → new=${user.id}`
+      );
     }
   }
 
-  // Fallback for dev mode without Supabase connection
-  const seedAdmin = getUsers().find((u) => u.role === 'admin') || getUsers()[0];
+  if (profile) {
+    return {
+      id: user.id,
+      name: profile.name || user.email || 'User',
+      email: profile.email || user.email || '',
+      role: (profile.role as UserRole) || 'employee'
+    };
+  }
+
+  // Step 5: No profile found at all — create one from auth metadata
+  // This handles the case where the auto-trigger wasn't set up yet
+  const nameFromMeta =
+    user.user_metadata?.name ||
+    user.email?.split('@')[0] ||
+    'User';
+
+  // Check if the user is the first-ever user — make them admin automatically
+  const { count } = await db
+    .from('users')
+    .select('id', { count: 'exact', head: true });
+
+  const isFirstUser = (count ?? 0) === 0;
+  const newRole: UserRole = isFirstUser ? 'admin' : 'employee';
+
+  await db.from('users').insert({
+    id: user.id,
+    name: nameFromMeta,
+    email: user.email || '',
+    role: newRole
+  });
+
+  console.log(
+    `[Auth] Auto-created profile for "${user.email}" with role="${newRole}"`
+  );
+
   return {
-    id: seedAdmin.id,
-    name: seedAdmin.name,
-    email: seedAdmin.email,
-    role: seedAdmin.role
+    id: user.id,
+    name: nameFromMeta,
+    email: user.email || '',
+    role: newRole
   };
+}
+
+/**
+ * Require a logged-in user, redirect to / if not authenticated.
+ * Returns the resolved CurrentUser.
+ */
+export async function requireAuth(): Promise<CurrentUser | null> {
+  const authClient = await createServerSupabaseClient();
+  if (!authClient) return null;
+
+  const {
+    data: { user }
+  } = await authClient.auth.getUser();
+
+  if (!user) return null;
+
+  return getCurrentUser();
 }

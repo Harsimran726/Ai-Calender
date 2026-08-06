@@ -1,24 +1,12 @@
 import { redirect } from 'next/navigation';
-import { createServerSupabaseClient } from '@/lib/supabase/server';
 import { fetchUsersAction } from '@/app/actions/users';
 import { UsersClient } from '@/components/users/UsersClient';
-import { getCurrentUser } from '@/lib/auth';
+import { requireAuth } from '@/lib/auth';
 
 export default async function AdminUsersPage() {
-  const supabase = await createServerSupabaseClient();
-  
-  if (supabase) {
-    const { data: { user } } = await supabase.auth.getUser();
-    if (!user) {
-      redirect('/');
-    }
-  }
-
-  const currentUser = await getCurrentUser();
-
-  if (currentUser.role !== 'admin') {
-    redirect('/dashboard');
-  }
+  const currentUser = await requireAuth();
+  if (!currentUser) redirect('/');
+  if (currentUser.role !== 'admin') redirect('/dashboard');
 
   const users = await fetchUsersAction();
 
