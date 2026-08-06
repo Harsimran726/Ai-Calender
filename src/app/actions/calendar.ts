@@ -51,12 +51,26 @@ export async function createClassAction(payload: {
   recurring: boolean;
 }) {
   const supabase = await createServerSupabaseClient();
+  const classId = crypto.randomUUID();
+  const sendAt = new Date(new Date(payload.start_time).getTime() - 3600000).toISOString();
+
   if (supabase) {
     await supabase.from('classes').insert({
-      id: crypto.randomUUID(),
+      id: classId,
       ...payload
     });
+
+    // Queue automated T-1hr email reminder in DB
+    await supabase.from('reminders').insert({
+      id: crypto.randomUUID(),
+      event_type: 'class',
+      event_id: classId,
+      recipient_id: payload.mentor_id,
+      send_at: sendAt,
+      sent: false
+    });
   }
+
   const created = addClassEvent({
     ...payload,
     status: 'scheduled'
@@ -73,7 +87,8 @@ export async function createDemoClassAction(payload: {
   attendees: Array<{ student_name: string; student_contact?: string }>;
 }) {
   const supabase = await createServerSupabaseClient();
-  const demoId = `demo-${Date.now()}`;
+  const demoId = crypto.randomUUID();
+  const sendAt = new Date(new Date(payload.start_time).getTime() - 3600000).toISOString();
   const attendeesWithId = payload.attendees.map((a, i) => ({
     id: `att-${Date.now()}-${i}`,
     demo_class_id: demoId,
@@ -83,11 +98,21 @@ export async function createDemoClassAction(payload: {
 
   if (supabase) {
     await supabase.from('demo_classes').insert({
-      id: crypto.randomUUID(),
+      id: demoId,
       mentor_id: payload.mentor_id,
       start_time: payload.start_time,
       end_time: payload.end_time,
       status: 'scheduled'
+    });
+
+    // Queue automated T-1hr email reminder in DB
+    await supabase.from('reminders').insert({
+      id: crypto.randomUUID(),
+      event_type: 'demo_class',
+      event_id: demoId,
+      recipient_id: payload.mentor_id,
+      send_at: sendAt,
+      sent: false
     });
   }
 
